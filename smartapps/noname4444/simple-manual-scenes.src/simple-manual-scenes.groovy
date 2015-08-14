@@ -29,9 +29,9 @@ definition(
     author: "Jim Worley",
     description: "This app allows you to manually set multiple device states and attach them all to a single button press.",
     category: "My Apps",
-    iconUrl: "http://cdn.device-icons.smartthings.com/unknown/zwave/static-controller.png",
-    iconX2Url: "http://cdn.device-icons.smartthings.com/unknown/zwave/static-controller@2x.png",
-    iconX3Url: "http://cdn.device-icons.smartthings.com/unknown/zwave/static-controller@2x.png")
+    iconUrl: "http://b.dryicons.com/images/icon_sets/coquette_part_7_icons_set/png/64x64/toolbox.png",
+    iconX2Url: "http://b.dryicons.com/images/icon_sets/coquette_part_7_icons_set/png/128x128/toolbox.png",
+    iconX3Url: "http://b.dryicons.com/images/icon_sets/coquette_part_7_icons_set/png/128x128/toolbox.png")
 
 
 preferences {
@@ -51,15 +51,17 @@ def main(){
 		section("Create Scenes"){
 			def prefScenes = getSceneMaps()
 			prefScenes.each(){ prefScene ->
-				 href(
-					name		: prefScene.key
-					,title		: prefScene.value 
-					,required	: false
-					,params		: [sceneID:prefScene.key]
-					,page		: "addScene"
-					,description: null
-					,state		: "complete"
-				)
+				if (settings["${prefScene.key}Status"] != "delete") {
+					 href(
+						name		: prefScene.key
+						,title		: prefScene.value 
+						,required	: false
+						,params		: [sceneID:prefScene.key]
+						,page		: "addScene"
+						,description: getSceneDescription(prefScene.key)
+						,state		: getSceneStatus(prefScene.key)
+					)
+				}
 			}
 		}
 		section {
@@ -78,7 +80,7 @@ def main(){
 
 
 def addScene(params){
-	log.debug "ScenePage- params:${params}"
+	//log.debug "ScenePage- params:${params}"
 
 	//account for different paths between android and ios
     def sceneID
@@ -87,16 +89,12 @@ def addScene(params){
 	} else if (params.params) {
 	sceneID = params.params.sceneID
 	} else {
-		sceneID = state.sceneID
+		sceneID = atomicState.sceneID
 	}
-	state.sceneID = sceneID
+	atomicState.sceneID = sceneID
 
-	log.debug "SceneID:$sceneID"
-	log.debug "Settings are dumb: ${settings}"
 	def nextDeviceIDX = getNextDeviceIDX(sceneID)
 	def nextDeviceID = "${sceneID}d${nextDeviceIDX}"
-	
-	//log.debug "ScenePage- sceneID:${sceneID} sceneID:${nextSceneID}"
 
 	dynamicPage(name: "addScene", title: getScenePageTitle(sceneID), uninstall: false,install: false) {
 		section {
@@ -111,7 +109,6 @@ def addScene(params){
         section("Devices"){
 			def prefDevices = getDeviceMaps(sceneID)
 			prefDevices.each(){ prefDevice ->
-				log.debug(prefDevice.key)
 				if (settings["${prefDevice.key}Status"] != "delete") {
 					href(
 						name		: prefDevice.key
@@ -156,7 +153,7 @@ def addScene(params){
 }
 
 def addDevice(params){
-	log.debug "devicePage- params:${params}" 
+	//log.debug "devicePage- params:${params}" 
 	//account for different paths between android and ios
 	def deviceID
 	if (params.deviceID) {
@@ -164,10 +161,10 @@ def addDevice(params){
 	} else if (params.params) {
 	    deviceID = params.params.deviceID
 	} else {
-		deviceID = state.deviceID
+		deviceID = atomicState.deviceID
 	}
 	//def sceneID = params.sceneID ?: params.params.sceneID
-	state.deviceID = deviceID
+	atomicState.deviceID = deviceID
 
 	dynamicPage(name: "addDevice", title: fancyDeviceString(settings[deviceID]), install: false) {
 		log.debug "Settings are dumb: ${settings}"
@@ -208,7 +205,7 @@ def addDevice(params){
 								,title		: "Brightness level, between 1 and 100.  Defaults to keeping the current level."
 								,range: "1..100"
 								,required	: false
-								,defaultValue: settings["${deviceID}Level"] ?: null
+								,defaultValue: rangeFix(settings["${deviceID}Level"]) ?: null
 								,submitOnChange: true
 							)
 						}  //Switches have level setting
@@ -216,19 +213,19 @@ def addDevice(params){
 						    input(
 								name		: "${deviceID}Hue"
 								,type		: "number"
-								,title		: "Hue level, between 0 and 100.  Defaults to keeping the current hue."
-								,range: "0..100"
+								,title		: "Hue level, between 1 and 100.  Defaults to keeping the current hue."
+								,range: "1..100"
 								,required	: false
-								,defaultValue: settings["${deviceID}Hue"] ?: null
+								,defaultValue: rangeFix(settings["${deviceID}Hue"]) ?: null
 								,submitOnChange: true
 							)
 						    input(
 								name		: "${deviceID}Saturation"
 								,type		: "number"
-								,title		: "Saturation level, between 0 and 100.  Defaults to keeping the current saturation."
-								,range: "0..100"
+								,title		: "Saturation level, between 1 and 100.  Defaults to keeping the current saturation."
+								,range: "1..100"
 								,required	: false
-								,defaultValue: settings["${deviceID}Saturation"] ?: null
+								,defaultValue: rangeFix(settings["${deviceID}Saturation"]) ?: null
 								,submitOnChange: true
 							)
 						}  //Switches have color setting
@@ -256,21 +253,133 @@ def addDevice(params){
 def installed() {
 	log.debug "Installed with settings: ${settings}"
 
-	initialize()
+	//initialize()
 }
 
 def updated() {
 	log.debug "Updated with settings: ${settings}"
 
-	unsubscribe()
+	//unsubscribe()
 	initialize()
+
+	//def sceneSwitches = getChildDevices()
+	//subscribe(sceneSwitches,"switch",processSwitches)
 }
 
 def initialize() {
-	// TODO: subscribe to attributes, devices, locations, etc.
+	def numScenes = getMaxSceneIDX()
+	def sceneList = []
+	def childList = []
+	def newSwitch
+	if (numScenes) {
+		(1..numScenes).each{
+			if (settings["s${it}Status"] == "active") {
+				sceneList << "s${it.toString()}".toString()
+			}
+		}
+		childList = getAllChildDevices()*.name
+		log.debug "Scene list: $sceneList"
+		log.debug "Child List: $childList"
+		//Look for new scenes that need to have a switch created
+		sceneList.each{ sceneID ->
+			log.debug "!childList.contains(sceneID): ${!childList.contains(sceneID)}"
+			if (!childList.contains(sceneID)) {
+				log.debug("I am adding a device for scene $sceneID")
+				newSwitch = addChildDevice("noname4444", "Simple Manual Scene Switch", "${app.id}/${sceneID}", null, [name: sceneID, label: settings[sceneID], completedSetup: true])
+				subscribe(newSwitch,"switch",processSwitches)
+			}
+		}
+		//atomicState.removeList = []
+		//Look for swtiches that no longer have an active scene
+		childList.each{deviceID ->
+			log.debug "!sceneList.contains(deviceID): ${!sceneList.contains(deviceID)}"
+			if (!sceneList.contains(deviceID)) {
+				log.debug("I am removing a device for scene ${deviceID}, deviceNetworkID: ${app.id}/${deviceID}")
+				try {
+					unsubscribe(getAllChildDevices().find(){it.name == deviceID})
+					if (atomicState.removeList) {
+						atomicState.removeList = atomicState.removeList + ["${app.id}/${deviceID}"]
+					}
+					else {
+						atomicState.removeList = ["${app.id}/${deviceID}"]
+					}
+					log.debug "Remove list added: ${atomicState.removeList}"
+					runIn(5,removeKid)
+					//deleteChildDevice("${app.id}/${deviceID}")
+				} catch (any) {
+					log.error "Attempt to delete the switch for scene $deviceID failed."
+					log.error any
+					//log.debug getAllChildDevices().findAll(){it.name == deviceID}*.getProperties()
+				}
+			}
+		}
+	}
+	else
+	{
+    	log.debug "No scenes defined, nothing to do."
+	}
 }
 
+def removeKid(){
+	log.debug "Remove list: ${atomicState.removeList}"
+	//deleteChildDevice(atomicState.removeList[0])
+	atomicState.removeList.each{
+		try{
+			deleteChildDevice(it)
+		} catch (any){
+			log.error any
+		}
+	}
+	atomicState.removeList = []
+	log.debug "Remove list post: ${atomicState.removeList}"
+}
+
+
 // TODO: implement event handlers
+
+def processSwitches(evt){
+	//log.debug "Event Device ID: ${evt.deviceId}, Device Name: ${evt.device.name}"
+	//log.debug evt.device.getProperties()
+	def sceneID = evt.device.name
+	log.debug "Simple Manual Scene: Switch pressed!  $sceneID"
+	def numDevices = getMaxDeviceIDX(sceneID)
+	if (!numDevices) {return}
+	def deviceID
+	def deviceOptions
+	//loop through the device groups for the scene
+	(1..numDevices).each{ 
+		deviceID = "${sceneID}d${it}"
+		//Process each device group if it is defined and is active
+		if (settings[deviceID] && settings["${deviceID}Status"] == 'active'){
+			//process each device in the device group
+			settings[deviceID].each{ dev ->
+				if (dev){
+					log.debug "Processing device ${dev.name}"
+					deviceOptions = [:]
+					if (settings["${deviceID}State"] == "off"){
+						dev.off()
+					} //turning device off
+					//Turn the device on and process level/color settings if they are specified
+					else {
+						dev.on()
+						if (settings["${deviceID}Level"]){
+							dev.setLevel(rangeFix(settings["${deviceID}Level"]))
+						}
+						if (settings["${deviceID}Hue"]){
+							deviceOptions.put("hue",rangeFix(settings["${deviceID}Hue"]))
+						}
+						if (settings["${deviceID}Saturation"]){
+							deviceOptions.put("saturation",rangeFix(settings["${deviceID}Saturation"]))
+						}
+						if (deviceOptions){
+							dev.setColor(deviceOptions)
+						}
+					} //turning device on
+				} //Make sure the device hasn't been deleted
+			} //devices within a device group loop
+		} //device exists and is active check
+	} //device group loop
+} //function definition
 
 
 /**********************************************
@@ -292,16 +401,6 @@ def getSceneMaps(){
 def getDeviceMaps(sceneID){
 	//scene key format : s1d1
 	return settings.findAll(){it.key ==~ /${sceneID}d[0-9]+/}.sort{it.key}
-}
-
-def getDeviceGroupStatus(deviceID){
-	if (deviceErrors(deviceID)) {
-		return "incomplete"
-	}
-	else if (settings["${deviceID}Status"] == "active") {
-		return "complete"
-	}
-	else return null
 }
 
 def getnextSceneIDX(){
@@ -341,25 +440,97 @@ def getMaxDeviceIDX(sceneID){
 	return next
 }
 
+def getMaxSceneIDX(){
+	def found = settings.findAll(){it.key ==~ /s[0-9]+/}
+	if (found.size() == 0) return null
+	def next = 0
+	def crnt
+	found.each(){ it.key
+		crnt = it.key.replace("s","").toInteger()
+		if (crnt > next ) next = crnt
+	}
+	return next
+}
+
 def getDeviceDescription(deviceID){
    def descriptionParts = []
+
+   if (deviceErrors(deviceID)){
+   	  return "ERRORS: Please fix the following error(s) to enable this group.  ${deviceErrors(deviceID)}"
+   }
+
+   if (settings["${deviceID}Status"] == "inactive"){
+   	  descriptionParts << "INACTIVE:"
+   }
 
    descriptionParts << "${fancyDeviceString(settings[deviceID])} will turn ${settings["${deviceID}State"]}."
 
    if (settings["${deviceID}State"] == "on") {
 	   if (settings["${deviceID}Level"]) {
-	     descriptionParts << "The light brightness will turn to ${settings["${deviceID}Level"]}."
+	     descriptionParts << "The light brightness will turn to ${rangeFix(settings["${deviceID}Level"])}."
 	   }
 	   if (settings["${deviceID}Hue"]) {
-	     descriptionParts << "The hue will be set to ${settings["${deviceID}Hue"]}."
+	     descriptionParts << "The hue will be set to ${rangeFix(settings["${deviceID}Hue"])}."
 	   }
 	   if (settings["${deviceID}Saturation"]) {
-	     descriptionParts << "The saturation will be set to ${settings["${deviceID}Saturation"]}."
+	     descriptionParts << "The saturation will be set to ${rangeFix(settings["${deviceID}Saturation"])}."
 	   }
    }
 
 
    return descriptionParts.join(" ")
+}
+
+def getDeviceGroupStatus(deviceID){
+	if (deviceErrors(deviceID)) {
+		return "incomplete"
+	}
+	else if (settings["${deviceID}Status"] == "active") {
+		return "complete"
+	}
+	else return null
+}
+
+//Scans through all the active devices for a scene and compiles them into a list
+def getAllDevices(sceneID){
+	def allDevices = []
+	def numDevices = getMaxDeviceIDX(sceneID)
+
+	if (numDevices){
+		(1..numDevices).each{
+	   	 	if (settings["${sceneID}d${it}Status"] == "active") {
+	   	 		allDevices.addAll(settings["${sceneID}d${it}"])
+   	 		}
+		}
+   	}
+   	 return allDevices
+}
+
+def getSceneDescription(sceneID){
+	def allDevs = getAllDevices(sceneID)
+	def descriptionParts = []
+
+	if (allDevs) {
+		if (settings["${sceneID}Status"] == "inactive") {
+			descriptionParts << "INACTIVE:"
+		}
+		descriptionParts << "The following devices will be set by this scene: ${fancyDeviceString(allDevs)}"
+	}
+	else {
+		descriptionParts << "ERROR: No devices set for this scene."
+	}
+
+	return descriptionParts.join(" ")
+}
+
+def getSceneStatus(sceneID){
+	if (!getAllDevices(sceneID)) {
+		return "incomplete"
+	}
+	else if (settings["${sceneID}Status"] == "active") {
+		return "complete"
+	}
+	else return null
 }
 
 /****************************
@@ -389,6 +560,16 @@ def deviceLabel(device) {
 	return device.label ?: device.name
 }
 
+def rangeFix(range){
+	//log.debug "The range says: $range"
+	if (!range) return null
+	def rangeInt = range.toInteger()
+	if (rangeInt >= 1 && rangeInt <= 100) return range
+	else if (rangeInt < 1)  return 1
+	else if (rangeInt > 100)  return 100
+	else return null
+}
+
 /***********************************
  * Capability and Error Checking
  ***********************************/
@@ -410,27 +591,29 @@ private hasCommand(deviceList,commandName) {
 }
 
 private deviceErrors(deviceID){
-   def descriptionParts = []
+//   def descriptionParts = []
+   return null
 
-   if (settings["${deviceID}Level"] && (settings["${deviceID}Level"] < 1 || settings["${deviceID}Level"] > 100)) {
-     descriptionParts << "The brightness level must be between 1 and 100 or missing."
-   }
-   if (settings["${deviceID}Hue"] && (settings["${deviceID}Hue"]  < 0 || settings["${deviceID}Hue"] > 100)) {
-     descriptionParts << "The hue must be between 0 and 100 or missing."
-   }
-   if (settings["${deviceID}Saturation"] && (settings["${deviceID}Saturation"] < 0 || settings["${deviceID}Saturation"] > 100)) {
-     descriptionParts << "The saturation must be between 0 and 100 or missing."
-   }
-   return descriptionParts.join(" ")
+//   if (settings["${deviceID}Level"] && (settings["${deviceID}Level"] < 1 || settings["${deviceID}Level"] > 100)) {
+//     descriptionParts << "The brightness level must be between 1 and 100 or missing."
+//   }
+//   if (settings["${deviceID}Hue"] && (settings["${deviceID}Hue"]  < 1 || settings["${deviceID}Hue"] > 100)) {
+//     descriptionParts << "The hue must be between 0 and 100 or missing."
+//   }
+//   if (settings["${deviceID}Saturation"] && (settings["${deviceID}Saturation"] < 1 || settings["${deviceID}Saturation"] > 100)) {
+//     descriptionParts << "The saturation must be between 0 and 100 or missing."
+//   }
+//   return descriptionParts.join(" ")
 }
 
 private sceneErrors(sceneID){
-   def descriptionParts = []
+	def descriptionParts = []
+	def repeats = []
 
-   if (getMaxDeviceIDX(sceneID)){
-   	 log.debug("Number of devices: ${getMaxDeviceIDX(sceneID)}")
-   }
-   
-   return descriptionParts.join(" ")
+	getAllDevices(sceneID).groupBy{it.id}.findAll{it.value.size() >1}.each() {repeats << it.value[0]}
+	if (repeats){
+		descriptionParts << "The following devices are used in more than one device list: ${fancyDeviceString(repeats)}"
+	}
+	return descriptionParts.join(" ")
 }
 
