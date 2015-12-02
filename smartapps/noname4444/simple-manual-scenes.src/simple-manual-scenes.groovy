@@ -1,5 +1,5 @@
 /**
- *  Simple Manual Scenes v1.0.0
+ *  Simple Manual Scenes v1.1.0
  *
  *  Copyright 2015 Jim Worley
  *
@@ -209,7 +209,7 @@ def addDevice(params){
 								,submitOnChange: true
 							)
 						}  //Switches have level setting
-						if (hasCommand(deviceID,"setColor")){
+						if (hasCommand(deviceID,"setHue")){
 						    input(
 								name		: "${deviceID}Hue"
 								,type		: "number"
@@ -219,6 +219,8 @@ def addDevice(params){
 								,defaultValue: rangeFix(settings["${deviceID}Hue"]) ?: null
 								,submitOnChange: true
 							)
+                        }  //Switches have hue setting     
+                        if (hasCommand(deviceID,"setSaturation")){
 						    input(
 								name		: "${deviceID}Saturation"
 								,type		: "number"
@@ -228,7 +230,18 @@ def addDevice(params){
 								,defaultValue: rangeFix(settings["${deviceID}Saturation"]) ?: null
 								,submitOnChange: true
 							)
-						}  //Switches have color setting
+						}  //Switches have saturation setting
+                        if (hasCommand(deviceID,"setColorTemperature")){
+						    input(
+								name		: "${deviceID}ColorTemperature"
+								,type		: "number"
+								,title		: "Color Temp level, between 2700 and 9000.  Defaults to keeping the current Color Temp."
+								,range: "2700..9000"
+								,required	: false
+								,defaultValue: settings["${deviceID}ColorTemperature"] ?: null
+								,submitOnChange: true
+							)
+						 }  //Switches have saturation setting
 					} //If the switch(es) will be turned on
 					input(
 						name		: "${deviceID}Status"
@@ -286,7 +299,7 @@ def initialize() {
 			if (!childList.contains(sceneID)) {
 				log.debug("I am adding a device for scene $sceneID")
 				newSwitch = addChildDevice("noname4444", "Simple Manual Scene Switch", "${app.id}/${sceneID}", null, [name: sceneID, label: settings[sceneID], completedSetup: true])
-				subscribe(newSwitch,"switch",processSwitches)
+				subscribe(newSwitch,"switch.on",processSwitches)
 			}
 		}
 		//atomicState.removeList = []
@@ -340,12 +353,14 @@ def removeKid(){
 def processSwitches(evt){
 	//log.debug "Event Device ID: ${evt.deviceId}, Device Name: ${evt.device.name}"
 	//log.debug evt.device.getProperties()
+    evt.device.off()
 	def sceneID = evt.device.name
 	log.debug "Simple Manual Scene: Switch pressed!  $sceneID"
 	def numDevices = getMaxDeviceIDX(sceneID)
 	if (!numDevices) {return}
 	def deviceID
 	def deviceOptions
+    def huenum
 	//loop through the device groups for the scene
 	(1..numDevices).each{ 
 		deviceID = "${sceneID}d${it}"
@@ -361,18 +376,20 @@ def processSwitches(evt){
 					} //turning device off
 					//Turn the device on and process level/color settings if they are specified
 					else {
+                        //log.debug dev.getProperties()
 						dev.on()
 						if (settings["${deviceID}Level"]){
 							dev.setLevel(rangeFix(settings["${deviceID}Level"]))
 						}
 						if (settings["${deviceID}Hue"]){
-							deviceOptions.put("hue",rangeFix(settings["${deviceID}Hue"]))
+                            huenum = rangeFix(settings["${deviceID}Hue"])
+                            dev.setHue(huenum)
 						}
 						if (settings["${deviceID}Saturation"]){
-							deviceOptions.put("saturation",rangeFix(settings["${deviceID}Saturation"]))
+                            dev.setSaturation(rangeFix(settings["${deviceID}Saturation"]))
 						}
-						if (deviceOptions){
-							dev.setColor(deviceOptions)
+                        if (settings["${deviceID}ColorTemperature"]){
+                            dev.setColorTemperature(settings["${deviceID}ColorTemperature"])
 						}
 					} //turning device on
 				} //Make sure the device hasn't been deleted
@@ -475,6 +492,10 @@ def getDeviceDescription(deviceID){
 	   if (settings["${deviceID}Saturation"]) {
 	     descriptionParts << "The saturation will be set to ${rangeFix(settings["${deviceID}Saturation"])}."
 	   }
+       if (settings["${deviceID}ColorTemperature"]) {
+	     descriptionParts << "The color temp will be set to ${settings["${deviceID}ColorTemperature"]}."
+	   }
+       
    }
 
 
