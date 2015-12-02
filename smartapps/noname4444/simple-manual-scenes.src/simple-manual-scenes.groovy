@@ -22,7 +22,11 @@
  *
  *  Author: Jim Worley
  *  Date: 08Aug2015
+ *
+ * Thanks to Mike Maxwell for the superState app which this GUI was based off of!  You can see
+ * his work at https://github.com/mikemaxwell.
  */
+ 
 definition(
     name: "Simple Manual Scenes",
     namespace: "noname4444",
